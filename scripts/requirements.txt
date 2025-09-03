@@ -1,0 +1,2 @@
+# scripts/requirements.txt
+faker==37.5.3

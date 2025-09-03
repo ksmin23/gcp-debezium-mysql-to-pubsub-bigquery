@@ -1,0 +1,27 @@
+debezium.sink.type=pubsub
+debezium.sink.pubsub.project.id=<project-id>
+debezium.sink.pubsub.region=<region>
+
+#debezium.source.offset.storage=org.apache.kafka.connect.storage.FileOffsetBackingStore
+debezium.source.offset.storage.file.filename=data/offset.dat
+debezium.source.offset.flush.interval.ms=0
+debezium.source.schema.history.internal=io.debezium.storage.file.history.FileSchemaHistory
+debezium.source.schema.history.internal.file.filename=data/schema_history.dat
+
+debezium.source.connector.class=io.debezium.connector.mysql.MySqlConnector
+debezium.source.database.hostname=<your-mysql-private-ip> # Example: 10.1.0.2
+debezium.source.database.port=3306
+debezium.source.database.user=datastream
+debezium.source.database.password=<your-database-user-password> # Example: StrongPassword123!
+debezium.source.database.dbname=<your-database-name> # Example: testdb
+# debezium.source.database.ssl.mode=required
+debezium.source.database.server.id=<a-unique-numeric-id> # Example: 12345
+debezium.source.database.server.name=<a-logical-server-name> # This is used as the topic prefix. Example: mysql-prod-01
+debezium.source.topic.prefix=<your-topic-prefix> # Example: tutorial
+
+# Quarkus
+quarkus.log.level=INFO
+quarkus.log.console.json=false
+# Uncomment to change Debezium port from 8080 [default] to any other port
+# quarkus.http.port=8980
+# quarkus.log.file.enable=true
