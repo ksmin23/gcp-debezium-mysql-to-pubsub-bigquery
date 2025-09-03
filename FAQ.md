@@ -5,6 +5,7 @@
 - [Q2. Why do I get a configuration file load error when running `docker run` on the `mysql-client-vm` instance?](#q2-why-do-i-get-a-configuration-file-load-error-when-running-docker-run-on-the-mysql-client-vm-instance)
 - [Q3. Can you provide a Terraform command cheatsheet?](#q3-can-you-provide-a-terraform-command-cheatsheet)
 - [Q4. `terraform apply` succeeded, but why weren't the GCS files copied to the VM instance?](#q4-terraform-apply-succeeded-but-why-werent-the-gcs-files-copied-to-the-vm-instance)
+- [Q5. When using `debezium-server` to send data from MySQL to Pub/Sub, why are two Pub/Sub topics required?](#q5-when-using-debezium-server-to-send-data-from-mysql-to-pubsub-why-are-two-pubsub-topics-required)
 
 ---
 
@@ -270,3 +271,86 @@ For future troubleshooting, you can check the VM's **serial console logs** to se
 ```bash
 gcloud compute instances get-serial-port-output mysql-client-vm --zone <your-zone> --port 1
 ```
+
+---
+
+## Q5. When using `debezium-server` to send data from MySQL to Pub/Sub, why are two Pub/Sub topics required?
+
+I have the following configuration in my `application.properties` file:
+
+```properties
+debezium.sink.type=pubsub
+...
+debezium.source.topic.prefix=debezium-topic
+debezium.source.database.dbname=testdb
+...
+```
+
+Based on the project code, please explain why two topics, `debezium-topic` and `debezium-topic.testdb.retail_trans`, are needed with this setup.
+
+---
+
+**Answer:**
+
+The two topics are used for different purposes: one for 'data change events' and the other for 'connector state management (heartbeat)'.
+
+In short, Debezium separates the actual data changes from the system's metadata. The role of each topic is as follows:
+
+1.  **`debezium-topic.testdb.retail_trans`**: This topic is for the actual data change events (CDC).
+2.  **`debezium-topic`**: This topic is for heartbeat messages that monitor the connector's status.
+
+### 1. Data Change Event Topic (`debezium-topic.testdb.retail_trans`)
+
+Debezium's core function is to capture database table changes (INSERT, UPDATE, DELETE) and send them to a message queue. To identify which table the change occurred in, Debezium uses the following default topic naming convention:
+
+**`<topic.prefix>.<database_name>.<table_name>`**
+
+The settings from your `application.properties` file are applied to this rule:
+
+-   `debezium.source.topic.prefix=debezium-topic`
+-   `debezium.source.database.dbname=testdb`
+-   (Example table name: `retail_trans`)
+
+According to this configuration, all data change events from the `retail_trans` table in the `testdb` database are sent to the `debezium-topic.testdb.retail_trans` topic.
+
+### 2. Heartbeat Topic (`debezium-topic`)
+
+When monitoring a table with infrequent changes, the Debezium connector might not send any messages for a long time. This makes it difficult to track whether the connector is still alive and to what point it has read the source database's transaction log (the offset).
+
+To solve this, Debezium uses a **heartbeat** feature. It periodically sends a simple "I'm still alive" message to continuously update the offset and maintain the connection status.
+
+The important point is that if a separate heartbeat topic is not configured, **Debezium uses the value of `debezium.source.topic.prefix` as the name for the heartbeat topic.**
+
+Therefore, because of the `debezium.source.topic.prefix=debezium-topic` setting, all heartbeat messages are sent to the `debezium-topic` topic.
+
+### Code-Level Analysis
+
+This topic routing logic is determined at the Debezium Core engine level, not within the Debezium Server's Pub/Sub Sink module. If you look at the `PubSubChangeConsumer.java` class in the `debezium-server-pubsub` module, you can see that it simply passes messages to the destination topic specified by the Debezium engine.
+
+```java
+// Inside the handleBatch method of PubSubChangeConsumer.java
+@Override
+public void handleBatch(List<ChangeEvent<Object, Object>> records, ...) {
+    for (ChangeEvent<Object, Object> record : records) {
+        // Get the destination topic name already determined by the Debezium engine.
+        final String topicName = streamNameMapper.map(record.destination());
+
+        // Send the message to that topic.
+        Publisher publisher = publishers.computeIfAbsent(topicName, ...);
+        PubsubMessage message = buildPubSubMessage(record);
+        deliveries.add(publisher.publish(message));
+    }
+    // ...
+}
+```
+
+The `PubSubChangeConsumer` reads the `record.destination()` value and sends the message to the corresponding Pub/Sub topic; it does not contain logic to decide the topic name itself.
+
+### Summary
+
+-   **Who Decides the Topic Name?**: The topic name is determined by the upstream Debezium source connector (`MySqlConnector`) based on the `application.properties` configuration, not by the Pub/Sub Sink.
+-   **Clear Separation of Roles for the Two Topics**:
+    -   **`debezium-topic.testdb.retail_trans`**: Receives data change events for the `retail_trans` table.
+    -   **`debezium-topic`**: Receives heartbeat messages to consistently record the connector's liveness and offset, even when there are no data changes.
+
+By separating topics for data and metadata (heartbeats), Debezium can reliably track data changes and manage the system's state.
