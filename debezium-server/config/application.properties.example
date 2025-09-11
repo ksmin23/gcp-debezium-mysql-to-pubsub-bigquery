@@ -19,6 +19,15 @@ debezium.source.database.server.id=<a-unique-numeric-id> # Example: 12345
 debezium.source.database.server.name=<a-logical-server-name> # This is used as the topic prefix. Example: mysql-prod-01
 debezium.source.topic.prefix=<your-topic-prefix> # Example: tutorial
 
+# SMT (Single Message Transform)
+# https://debezium.io/documentation/reference/stable/transformations/event-flattening.html
+debezium.source.transforms=unwrap
+debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
+debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
+debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+debezium.source.key.converter.schemas.enable=false
+debezium.source.value.converter.schemas.enable=false
+
 # Quarkus
 quarkus.log.level=INFO
 quarkus.log.console.json=false

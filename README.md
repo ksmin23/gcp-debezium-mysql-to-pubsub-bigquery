@@ -208,7 +208,7 @@ To avoid typing `sudo` for every `docker` command, you can add your user to the 
 
 1.  **Add the current user to the `docker` group:**
     ```bash
-    sudo usermod -aG docker $USER
+sudo usermod -aG docker $USER
     ```
 
 2.  **Apply the new group membership.** You can either log out and log back in, or run the following command to activate the changes for your current session:
@@ -543,3 +543,5 @@ To avoid incurring ongoing charges, destroy the infrastructure when you are fini
 - [Pub/Sub to BigQuery with BigQuery Subscription (2025-01-02)](https://medium.com/google-cloud/pub-sub-to-bigquery-with-bigquery-subscription-785e914bd63d)
 - [Create BigQuery subscriptions :: Google Cloud Pub/Sub](https://cloud.google.com/pubsub/docs/create-bigquery-subscription)
 - [BigQuery subscriptions :: Google Cloud Pub/Sub](https://cloud.google.com/pubsub/docs/bigquery)
+- [Realtime Change Data Capture To BigQuery — No Kafka, No Dataflow](https://blog.devgenius.io/realtime-change-data-capture-to-bigquery-no-kafka-no-dataflow-fb4a6994441b)
+- [Event Flattening :: Debezium Documentation](https://debezium.io/documentation/reference/stable/transformations/event-flattening.html)
