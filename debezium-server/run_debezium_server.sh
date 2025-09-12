@@ -1,5 +1,8 @@
 #!/bin/bash
 
+REPOSITORY=debezium/server
+TAG=3.0.0.Final
+
 # Define the name for the container to be managed.
 CONTAINER_NAME="debezium"
 
@@ -25,4 +28,4 @@ docker run -it --name $CONTAINER_NAME \
   -p 8080:8080 \
   -v $PWD/config:/debezium/config \
   -v $PWD/data:/debezium/data \
-  debezium/server:3.0.0.Final
+  $REPOSITORY:$TAG
