@@ -6,42 +6,90 @@ resource "google_bigquery_dataset" "debezium_sink" {
   description = "Dataset to store CDC events from Debezium."
 }
 
-# Create the BigQuery table.
-# The schema is defined to accept Pub/Sub's message format for BigQuery subscriptions.
-# It includes the raw message data, subscription name, message ID, and attributes.
+# Create the BigQuery table that will act as the data sink.
+# Important: Before starting the Debezium Server, you must ensure this table has been created,
+# as its schema is derived from the source database table.
 resource "google_bigquery_table" "cdc_events" {
   project    = var.project_id
   dataset_id = google_bigquery_dataset.debezium_sink.dataset_id
   table_id   = var.table_name
 
-  # When a Pub/Sub subscription writes to BigQuery, it uses a fixed schema.
-  # 'data' contains the message payload, and 'attributes' contains the message attributes.
+  deletion_protection = true
+
+  table_constraints {
+    primary_key {
+      columns = ["trans_id"]
+    }
+  }
+
+  # When a Pub/Sub subscription writes to BigQuery, it uses the schema of the target BigQuery table.
+  # Therefore, this table's schema must be defined to match the structure of the source MySQL table.
+  # The schema is defined based on the Debezium CDC event structure after SMT.
   schema = jsonencode([
     {
-      "name" : "data",
-      "type" : "JSON"
+      "name" : "trans_id",
+      "type" : "INTEGER",
+      "mode" : "REQUIRED"
     },
     {
-      "name" : "attributes",
-      "type" : "JSON"
+      "name" : "customer_id",
+      "type" : "STRING",
+      "mode" : "REQUIRED",
+      "maxLength": "12"
     },
     {
-      "name" : "message_id",
-      "type" : "STRING"
+      "name" : "event",
+      "type" : "STRING",
+      "mode" : "NULLABLE",
+      "maxLength": "10"
     },
     {
-      "name" : "publish_time",
-      "type" : "TIMESTAMP"
+      "name" : "sku",
+      "type" : "STRING",
+      "mode" : "REQUIRED",
+      "maxLength": "10"
     },
     {
-      "name" : "subscription_name",
-      "type" : "STRING"
+      "name" : "amount",
+      "type" : "INTEGER",
+      "mode" : "REQUIRED"
+    },
+    {
+      "name" : "device",
+      "type" : "STRING",
+      "mode" : "NULLABLE",
+      "maxLength": "10"
+    },
+    {
+      "name" : "trans_datetime",
+      "type" : "TIMESTAMP",
+      "mode" : "NULLABLE"
+    },
+    {
+      "name" : "__op",
+      "type" : "STRING",
+      "mode" : "NULLABLE"
+    },
+    {
+      "name" : "__table",
+      "type" : "STRING",
+      "mode" : "NULLABLE"
+    },
+    {
+      "name" : "__source_ts_ms",
+      "type" : "INTEGER",
+      "mode" : "NULLABLE"
+    },
+    {
+      "name" : "__deleted",
+      "type" : "BOOLEAN",
+      "mode" : "NULLABLE"
     }
   ])
 
   # Optional: Enable partitioning for better performance and cost management.
   time_partitioning {
     type  = "DAY"
-    field = "publish_time"
+    field = "trans_datetime"
   }
 }

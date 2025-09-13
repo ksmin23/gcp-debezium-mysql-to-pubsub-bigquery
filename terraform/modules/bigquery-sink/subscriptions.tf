@@ -56,17 +56,20 @@ resource "google_pubsub_subscription" "bigquery_subscription" {
   name    = "${var.pubsub_topic_name}-to-bigquery-sub"
   topic   = "projects/${var.project_id}/topics/${var.pubsub_topic_name}"
 
+  message_retention_duration = "604800s" # 7 days
+  ack_deadline_seconds       = 60
+
   # Configure the subscription to write directly to BigQuery.
   bigquery_config {
     table = "${var.project_id}:${google_bigquery_dataset.debezium_sink.dataset_id}.${google_bigquery_table.cdc_events.table_id}"
 
     # Add metadata such as message_id and publish_time to the BigQuery table.
-    write_metadata = true
+    # write_metadata = true
 
-    # Use the topic's schema. If the topic has a schema, Pub/Sub will validate
-    # messages against it and write them to BigQuery in the corresponding format.
-    # If the topic has no schema, set this to false.
-    use_topic_schema = false
+    # When true, the subscription uses the BigQuery table's schema to write data.
+    # Pub/Sub messages are expected to be JSON objects with fields matching the table schema.
+    # If false, it would use the Pub/Sub message schema defined on the topic.
+    use_table_schema = true
 
     # If set to true, fields in the message that are not in the BigQuery schema will be dropped.
     # If false, messages with extra fields will be sent to the dead-letter topic.

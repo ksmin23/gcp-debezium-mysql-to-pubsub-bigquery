@@ -196,6 +196,8 @@ The simplest way to import the data is to use Cloud SQL Studio again.
 
 Now that the source database is ready, connect to the GCE VM to configure and start the Debezium Server.
 
+**Note**: The Terraform deployment (`terraform apply`) creates the BigQuery table that serves as the data sink. It is essential to ensure that this deployment has completed successfully before starting Debezium Server. The pipeline relies on the BigQuery table already existing with a schema based on the source data, as the Pub/Sub subscription writes directly to it.
+
 #### a. Connect to the GCE VM
 
 Use the `gcloud` CLI to SSH into the VM via IAP.
@@ -499,19 +501,15 @@ Finally, confirm that the initial snapshot and any subsequent CDC events have be
 
     ```sql
     -- Replace with your project ID, dataset, and table name if different
-    SELECT
-      publish_time,
-      JSON_VALUE(data, "$.payload.op") AS operation,
-      JSON_VALUE(data, "$.payload.after.id") AS record_id,
-      data AS full_payload
+    SELECT *
     FROM
       `<YOUR_GCP_PROJECT_ID>.debezium_sink.cdc_events`
     ORDER BY
-      publish_time DESC
+      trans_id ASC
     LIMIT 100;
     ```
 
-You should see rows corresponding to the 1000 records you inserted. The `operation` column will show `"c"` for create (or `"r"` for the initial snapshot read). This confirms the pipeline is working. You can now perform additional `INSERT`, `UPDATE`, or `DELETE` operations in Cloud SQL Studio and see the new events appear in the BigQuery table in near real-time.
+You should see rows corresponding to the 1000 records you inserted. The `__op` column will show `"c"` for create (or `"r"` for the initial snapshot read). This confirms the pipeline is working. You can now perform additional `INSERT`, `UPDATE`, or `DELETE` operations in Cloud SQL Studio and see the new events appear in the BigQuery table in near real-time.
 
 ## Cleanup
 

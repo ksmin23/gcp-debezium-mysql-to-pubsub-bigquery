@@ -6,6 +6,9 @@
 - [Q3. Can you provide a Terraform command cheatsheet?](#q3-can-you-provide-a-terraform-command-cheatsheet)
 - [Q4. `terraform apply` succeeded, but why weren't the GCS files copied to the VM instance?](#q4-terraform-apply-succeeded-but-why-werent-the-gcs-files-copied-to-the-vm-instance)
 - [Q5. When using `debezium-server` to send data from MySQL to Pub/Sub, why are two Pub/Sub topics required?](#q5-when-using-debezium-server-to-send-data-from-mysql-to-pubsub-why-are-two-pubsub-topics-required)
+- [Q6. How do I format a Datetime/Timestamp column to a specific string format in Debezium Server?](#q6-how-do-i-format-a-datetimetimestamp-column-to-a-specific-string-format-in-debezium-server)
+- [Q7. How do I configure Debezium Server to read data only from specific tables in a specific database?](#q7-how-do-i-configure-debezium-server-to-read-data-only-from-specific-tables-in-a-specific-database)
+- [Q8. If I use `database.include.list` in Debezium Server, is the `debezium.source.database.dbname` setting still necessary?](#q8-if-i-use-databaseincludelist-in-debezium-server-is-the-debeziumsourcedatabasedbname-setting-still-necessary)
 
 ---
 
@@ -354,3 +357,144 @@ The `PubSubChangeConsumer` reads the `record.destination()` value and sends the 
     -   **`debezium-topic`**: Receives heartbeat messages to consistently record the connector's liveness and offset, even when there are no data changes.
 
 By separating topics for data and metadata (heartbeats), Debezium can reliably track data changes and manage the system's state.
+
+---
+
+## Q6. How do I format a Datetime/Timestamp column to a specific string format in Debezium Server?
+
+**Question:**
+I want to convert Change Data Capture (CDC) data from a `Datetime` or `Timestamp` column to a string with the format `"yyyy-MM-dd'T'HH:mm:ss'Z'"`. How can I configure this in Debezium Server?
+
+**Answer:**
+This transformation can be handled using Debezium's **Single Message Transform (SMT)** feature. Specifically, you will use the `TimestampConverter` built into Kafka Connect.
+
+You can add or modify the SMT-related configurations in your `application.properties` file as follows.
+
+### 1. Define the SMT Chain
+First, you need to define which SMTs to apply and in what order. It is common practice to first run `unwrap` to simplify Debezium's complex event envelope, and then run `format_ts` to convert the timestamp format.
+
+```properties
+# Defines the execution order of SMTs, separated by commas. ('unwrap' runs before 'format_ts')
+debezium.source.transforms=unwrap,format_ts
+```
+
+### 2. Configure the `unwrap` SMT (ExtractNewRecordState)
+This step extracts only the `after` state from the Debezium event, which contains the data after the change. This makes it easier for the `TimestampConverter` to access the field you want to transform.
+
+```properties
+# --- SMT A: Configure ExtractNewRecordState (unwrap) ---
+debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
+# You can include additional metadata fields like op (c,u,d) and table name.
+debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
+# Configures how delete events are handled.
+debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+```
+
+### 3. Configure the `format_ts` SMT (TimestampConverter) - The Core Step
+This is where the actual timestamp formatting happens.
+
+```properties
+# --- SMT B: Configure TimestampConverter (format_ts) ---
+debezium.source.transforms.format_ts.type=org.apache.kafka.connect.transforms.TimestampConverter$Value
+# Set the target data type for the converted field to 'string'.
+debezium.source.transforms.format_ts.target.type=string
+# Specify the actual column (field) name to be transformed.
+debezium.source.transforms.format_ts.field=<your-datetime-or-timestamp-column> # e.g., trans_datetime
+# Define the final date/time format.
+debezium.source.transforms.format_ts.format=yyyy-MM-dd'T'HH:mm:ss'Z'
+```
+
+### Complete Configuration Example
+You can integrate these settings into your `application.properties` file as shown below.
+
+```properties
+# SMT (Single Message Transform)
+# --- 1. Define SMT Chain Order ---
+debezium.source.transforms=unwrap,format_ts
+
+# --- 2. SMT A: Configure ExtractNewRecordState (unwrap) ---
+debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
+debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
+debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+
+# --- 3. SMT B: Configure TimestampConverter (format_ts) ---
+debezium.source.transforms.format_ts.type=org.apache.kafka.connect.transforms.TimestampConverter$Value
+debezium.source.transforms.format_ts.target.type=string
+# IMPORTANT: Replace this with the actual name of your timestamp column.
+debezium.source.transforms.format_ts.field=<your-datetime-or-timestamp-column> # e.g., trans_datetime
+debezium.source.transforms.format_ts.format=yyyy-MM-dd'T'HH:mm:ss'Z'
+```
+
+### References
+- **Debezium Official Documentation (Single Message Transforms - SMTs):** [Debezium SMTs Documentation](https://debezium.io/documentation/reference/stable/transformations/index.html)
+- **Apache Kafka Official Documentation (TimestampConverter):** [Apache Kafka Connect - TimestampConverter](https://kafka.apache.org/documentation/#org.apache.kafka.connect.transforms.TimestampConverter)
+
+---
+
+## Q7. How do I configure Debezium Server to read data only from specific tables in a specific database?
+
+**Question:**
+I want to restrict Debezium Server to perform Change Data Capture (CDC) only on specific tables within a specific database. For example, I only want to monitor the `orders` and `customers` tables in the `testdb` database.
+
+**Answer:**
+You can achieve this by using the `database.include.list` and `table.include.list` properties in your `application.properties` configuration file.
+
+### Configuration Steps
+
+1.  **Specify the Database to Monitor (`database.include.list`)**
+    First, explicitly list the databases that Debezium should connect to and track for schema history. This ensures that other irrelevant databases are ignored.
+
+2.  **Specify the Tables to Monitor (`table.include.list`)**
+    Next, provide a comma-separated list of the tables from which you want to capture change events. The format for each entry should be `database.table_name`.
+
+### Complete Configuration Example
+Add the following settings to your `application.properties` file:
+
+```properties
+# --- Database and Table Filtering Configuration ---
+
+# 1. Explicitly specify the database(s) to monitor. (Recommended)
+debezium.source.database.include.list=testdb
+
+# 2. Specify the list of tables to capture change data from.
+# Format: <database_name>.<table_name>,<database_name>.<another_table_name>
+debezium.source.table.include.list=testdb.orders,testdb.customers
+```
+
+After applying these settings and restarting Debezium Server, it will only detect and send change events from the `orders` and `customers` tables in the `testdb` database to the Pub/Sub topic. All changes in other databases or tables will be ignored.
+
+---
+
+## Q8. If I use `database.include.list` in Debezium Server, is the `debezium.source.database.dbname` setting still necessary?
+
+**Question:**
+I have specified the database to monitor using `debezium.source.database.include.list`. Do I still need to set the `debezium.source.database.dbname` property?
+
+**Answer:**
+In short, **it is not necessary, and it is recommended not to use it.**
+
+Using `database.include.list` is a more explicit and flexible approach. Using both properties together can cause confusion or lead to unexpected behavior.
+
+### Difference Between the Two Settings
+
+| Property                           | Purpose                                                                    | Characteristics                                    |
+| ---------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------- |
+| `debezium.source.database.dbname`  | Specifies a **single** database for the Debezium connector to connect to.  | Can only specify one database.                     |
+| `debezium.source.database.include.list` | Specifies a comma-separated **list** of databases to monitor.              | Allows for flexible management of multiple databases. |
+
+### Recommended Configuration
+
+The best practice is to explicitly manage the monitoring scope using `database.include.list`.
+
+```properties
+# 1. Comment out or remove the dbname setting.
+# debezium.source.database.dbname=<your-database-name>
+
+# 2. Explicitly specify the database(s) to monitor using include.list.
+debezium.source.database.include.list=testdb
+
+# 3. Now, select the desired tables from within the database(s) specified in the include.list.
+debezium.source.table.include.list=testdb.orders,testdb.customers
+```
+
+This configuration creates a clear and consistent instruction: "Only look at the `testdb` database, and within it, only capture changes from the `orders` and `customers` tables."

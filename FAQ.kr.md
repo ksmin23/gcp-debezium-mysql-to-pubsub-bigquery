@@ -6,6 +6,9 @@
 - [Q3. Terraform 명령어 치트시트(cheatsheet)를 알려주세요.](#q3-terraform-명령어-치트시트cheatsheet를-알려주세요)
 - [Q4. `terraform apply`는 성공했는데, 왜 VM 인스턴스에 GCS 파일이 복사되지 않았나요?](#q4-terraform-apply는-성공했는데-왜-vm-인스턴스에-gcs-파일이-복사되지-않았나요)
 - [Q5. `debezium-server`를 사용하여 MySQL에서 Pub/Sub로 데이터를 전송할 때, 왜 두 개의 Pub/Sub 토픽이 필요한가요?](#q5-debezium-server를-사용하여-mysql에서-pubsub로-데이터를-전송할-때-왜-두-개의-pubsub-토픽이-필요한가요)
+- [Q6. Debezium Server에서 Datetime/Timestamp 컬럼의 형식을 특정 포맷으로 변환하려면 어떻게 하나요?](#q6-debezium-server에서-datetimetimestamp-컬럼의-형식을-특정-포맷으로-변환하려면-어떻게-하나요)
+- [Q7. Debezium Server에서 특정 데이터베이스의 특정 테이블만 읽도록 설정하려면 어떻게 하나요?](#q7-debezium-server에서-특정-데이터베이스의-특정-테이블만-읽도록-설정하려면-어떻게-하나요)
+- [Q8. Debezium Server에서 `database.include.list`를 사용할 경우, `debezium.source.database.dbname` 설정이 필요한가요?](#q8-debezium-server에서-databaseincludelist를-사용할-경우-debeziumsourcedatabasedbname-설정이-필요한가요)
 
 ---
 
@@ -354,3 +357,144 @@ public void handleBatch(List<ChangeEvent<Object, Object>> records, ...) {
     -   **`debezium-topic`**: 데이터 변경이 없을 때도 커넥터의 생존 여부와 오프셋을 꾸준히 기록하기 위한 하트비트(Heartbeat) 메시지를 수신합니다.
 
 이처럼 데이터와 메타데이터(하트비트)를 위한 토픽을 분리함으로써, Debezium은 안정적으로 데이터 변경을 추적하고 시스템의 상태를 관리할 수 있습니다.
+
+---
+
+## Q6. Debezium Server에서 Datetime/Timestamp 컬럼의 형식을 특정 포맷으로 변환하려면 어떻게 하나요?
+
+**질문:**
+Debezium Server에서 `Datetime` 또는 `Timestamp` 타입의 컬럼에서 캡처된 CDC(Change Data Capture) 데이터를 `"yyyy-MM-dd'T'HH:mm:ss'Z'"` 형식의 문자열로 변환하고 싶습니다. 어떻게 설정해야 하나요?
+
+**답변:**
+이 변환 작업은 Debezium의 **SMT(Single Message Transform)** 기능을 사용하여 처리할 수 있습니다. 구체적으로는 Kafka Connect에 내장된 `TimestampConverter`를 활용합니다.
+
+`application.properties` 설정 파일에 다음과 같이 SMT 관련 설정을 추가하거나 수정하면 됩니다.
+
+### 1. SMT 체인 정의 (Define SMT Chain)
+먼저, 어떤 SMT를 어떤 순서로 적용할지 정의합니다. 일반적으로 Debezium의 복잡한 이벤트 구조(`envelope`)를 단순화하는 `unwrap`을 먼저 실행한 후, 타임스탬프 형식을 변환하는 `format_ts`를 실행합니다.
+
+```properties
+# 쉼표로 SMT 실행 순서를 정의합니다. ('unwrap' 실행 후 'format_ts' 실행)
+debezium.source.transforms=unwrap,format_ts
+```
+
+### 2. `unwrap` SMT 설정 (ExtractNewRecordState)
+Debezium 이벤트에서 실제 데이터 변경이 일어난 `after` 부분만 추출하는 단계입니다. 이 과정을 거쳐야 `TimestampConverter`가 변환할 필드에 쉽게 접근할 수 있습니다.
+
+```properties
+# --- SMT A: ExtractNewRecordState (unwrap) 설정 ---
+debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
+# op(c,u,d), table(테이블명) 같은 메타데이터 필드를 추가로 포함시킬 수 있습니다.
+debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
+# 삭제(delete) 이벤트 처리 방식을 설정합니다.
+debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+```
+
+### 3. `format_ts` SMT 설정 (TimestampConverter) - 핵심
+이 부분이 실제로 타임스탬프 형식을 변환하는 설정입니다.
+
+```properties
+# --- SMT B: TimestampConverter (format_ts) 설정 ---
+debezium.source.transforms.format_ts.type=org.apache.kafka.connect.transforms.TimestampConverter$Value
+# 변환 후의 데이터 타입을 'string'으로 지정합니다.
+debezium.source.transforms.format_ts.target.type=string
+# 변환을 적용할 실제 컬럼(필드) 이름을 지정합니다. 이 부분을 실제 컬럼명으로 바꿔주세요.
+debezium.source.transforms.format_ts.field=<your-datetime-or-timestamp-column> # e.g., trans_datetime
+# 최종적으로 변환될 날짜/시간 형식을 지정합니다.
+debezium.source.transforms.format_ts.format=yyyy-MM-dd'T'HH:mm:ss'Z'
+```
+
+### 전체 설정 예시
+`application.properties` 파일에 아래와 같이 SMT 관련 설정을 통합하여 적용할 수 있습니다.
+
+```properties
+# SMT (Single Message Transform)
+# --- 1. Define SMT Chain Order ---
+debezium.source.transforms=unwrap,format_ts
+
+# --- 2. SMT A: Configure ExtractNewRecordState (unwrap) ---
+debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
+debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
+debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+
+# --- 3. SMT B: Configure TimestampConverter (format_ts) ---
+debezium.source.transforms.format_ts.type=org.apache.kafka.connect.transforms.TimestampConverter$Value
+debezium.source.transforms.format_ts.target.type=string
+# 중요: 이 값을 실제 타임스탬프 컬럼 이름으로 변경하세요.
+debezium.source.transforms.format_ts.field=<your-datetime-or-timestamp-column> # e.g., trans_datetime
+debezium.source.transforms.format_ts.format=yyyy-MM-dd'T'HH:mm:ss'Z'
+```
+
+### 참고 자료
+- **Debezium 공식 문서 (Single Message Transforms - SMTs):** [Debezium SMTs Documentation](https://debezium.io/documentation/reference/stable/transformations/index.html)
+- **Apache Kafka 공식 문서 (TimestampConverter):** [Apache Kafka Connect - TimestampConverter](https://kafka.apache.org/documentation/#org.apache.kafka.connect.transforms.TimestampConverter)
+
+---
+
+## Q7. Debezium Server에서 특정 데이터베이스의 특정 테이블만 읽도록 설정하려면 어떻게 하나요?
+
+**질문:**
+Debezium Server가 특정 데이터베이스의 특정 테이블에서만 변경 데이터 캡처(CDC)를 수행하도록 제한하고 싶습니다. 예를 들어, `testdb` 데이터베이스의 `orders`와 `customers` 테이블만 모니터링하고 싶습니다.
+
+**답변:**
+`application.properties` 설정 파일에서 `database.include.list`와 `table.include.list` 속성을 사용하여 이 요구사항을 구현할 수 있습니다.
+
+### 설정 방법
+
+1.  **모니터링할 데이터베이스 지정 (`database.include.list`)**
+    먼저, Debezium이 스키마 변경 히스토리를 추적하고 연결할 데이터베이스 목록을 명시적으로 지정합니다. 이렇게 하면 관련 없는 다른 데이터베이스는 무시됩니다.
+
+2.  **모니터링할 테이블 지정 (`table.include.list`)**
+    다음으로, 실제 변경 이벤트를 캡처할 테이블 목록을 `데이터베이스명.테이블명` 형식으로 지정합니다. 여러 테이블은 쉼표(`,`)로 구분합니다.
+
+### 전체 설정 예시
+`application.properties` 파일에 아래와 같이 설정을 추가합니다.
+
+```properties
+# --- 데이터베이스 및 테이블 필터링 설정 ---
+
+# 1. 모니터링할 데이터베이스를 명시적으로 지정합니다. (권장)
+debezium.source.database.include.list=testdb
+
+# 2. 변경 데이터를 캡처할 테이블 목록을 지정합니다.
+# 형식: <데이터베이스명>.<테이블명>,<데이터베이스명>.<다른_테이블명>
+debezium.source.table.include.list=testdb.orders,testdb.customers
+```
+
+이 설정을 적용하고 Debezium Server를 재시작하면, 서버는 오직 `testdb` 데이터베이스의 `orders`와 `customers` 테이블에서 발생하는 변경 사항만 감지하여 Pub/Sub 토픽으로 전송하게 됩니다. 다른 데이터베이스나 다른 테이블의 변경은 모두 무시됩니다.
+
+---
+
+## Q8. Debezium Server에서 `database.include.list`를 사용할 경우, `debezium.source.database.dbname` 설정이 필요한가요?
+
+**질문:**
+`debezium.source.database.include.list`를 사용하여 모니터링할 데이터베이스를 지정했습니다. 이 경우에도 `debezium.source.database.dbname` 속성을 설정해야 하나요?
+
+**답변:**
+결론부터 말하자면, **필요 없으며 오히려 사용하지 않는 것을 권장**합니다.
+
+`database.include.list`를 사용하는 것이 더 명확하고 유연한 방법이며, 두 설정을 함께 사용할 경우 혼란을 야기하거나 예기치 않은 동작을 유발할 수 있습니다.
+
+### 두 설정의 차이점
+
+| 속성                               | 목적                                                               | 특징                                       |
+| ---------------------------------- | ------------------------------------------------------------------ | ------------------------------------------ |
+| `debezium.source.database.dbname`  | Debezium 커넥터가 연결할 **단일** 데이터베이스를 지정합니다.       | 하나의 데이터베이스만 지정할 수 있습니다.  |
+| `debezium.source.database.include.list` | 모니터링할 데이터베이스의 **목록**을 쉼표(`,`)로 구분하여 지정합니다. | 여러 데이터베이스를 유연하게 관리할 수 있습니다. |
+
+### 권장하는 설정 방법
+
+`database.include.list`를 사용하여 모니터링 대상을 명시적으로 관리하는 것이 가장 좋습니다.
+
+```properties
+# 1. dbname 설정은 주석 처리하거나 삭제합니다.
+# debezium.source.database.dbname=<your-database-name>
+
+# 2. include.list를 사용하여 모니터링할 데이터베이스를 명시적으로 지정합니다.
+debezium.source.database.include.list=testdb
+
+# 3. 이제 include.list에 지정된 데이터베이스 내에서 원하는 테이블을 선택합니다.
+debezium.source.table.include.list=testdb.orders,testdb.customers
+```
+
+이렇게 설정하면 "오직 `testdb` 데이터베이스만 살펴보고, 그중에서도 `orders`와 `customers` 테이블의 변경 사항만 캡처하라"는 명확하고 일관된 구성이 됩니다.

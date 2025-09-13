@@ -13,7 +13,11 @@ debezium.source.database.hostname=<your-mysql-private-ip> # Example: 10.1.0.2
 debezium.source.database.port=3306
 debezium.source.database.user=datastream
 debezium.source.database.password=<your-database-user-password> # Example: StrongPassword123!
-debezium.source.database.dbname=<your-database-name> # Example: testdb
+# debezium.source.database.dbname=<your-database-name> # Example: testdb
+# (Optional but recommended) A comma-separated list of databases to monitor.
+debezium.source.database.include.list=<your-database-name> # Example: testdb
+# A comma-separated list of tables to monitor, specified as <database_name>.<table_name>.
+debezium.source.table.include.list=<your-table-full-name> # Example: testdb.orders,testdb.customers
 # debezium.source.database.ssl.mode=required
 debezium.source.database.server.id=<a-unique-numeric-id> # Example: 12345
 debezium.source.database.server.name=<a-logical-server-name> # This is used as the topic prefix. Example: mysql-prod-01
@@ -21,10 +25,23 @@ debezium.source.topic.prefix=<your-topic-prefix> # Example: tutorial
 
 # SMT (Single Message Transform)
 # https://debezium.io/documentation/reference/stable/transformations/event-flattening.html
-debezium.source.transforms=unwrap
+# --- 1. Define SMT Chain Order ---
+# Executes 'unwrap' first, followed by 'format_ts' (comma-separated).
+debezium.source.transforms=unwrap,format_ts
+
+# --- 2. SMT A: Configure ExtractNewRecordState (unwrap) ---
+# Unwraps the Debezium event envelope and extracts only the 'after' state.
 debezium.source.transforms.unwrap.type=io.debezium.transforms.ExtractNewRecordState
 debezium.source.transforms.unwrap.add.fields=op,table,source.ts_ms
 debezium.source.transforms.unwrap.delete.handling.mode=rewrite
+
+# --- 3. SMT B: Configure TimestampConverter (format_ts) ---
+# Converts the format of a specific field in the unwrapped record.
+debezium.source.transforms.format_ts.type=org.apache.kafka.connect.transforms.TimestampConverter$Value
+debezium.source.transforms.format_ts.target.type=string
+debezium.source.transforms.format_ts.field=<your-datetime-or-timestamp-column> # e.g., trans_datetime
+debezium.source.transforms.format_ts.format=yyyy-MM-dd'T'HH:mm:ss'Z'
+
 debezium.source.key.converter.schemas.enable=false
 debezium.source.value.converter.schemas.enable=false
 

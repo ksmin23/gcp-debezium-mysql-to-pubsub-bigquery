@@ -6,7 +6,7 @@
 To provision a scalable, real-time data analytics pipeline on Google Cloud Platform using Infrastructure as Code (IaC). This project automates the deployment of a Change Data Capture (CDC) system that streams changes from a Cloud SQL for MySQL source to a Cloud Pub/Sub topic, which are then ingested directly into a BigQuery table. The pipeline utilizes a Debezium Server running in a Docker container on a Google Compute Engine (GCE) VM, with the entire infrastructure managed by Terraform.
 
 ### 1.2. Background
-This project implements a modern, serverless-first CDC architecture for streaming database changes to a data warehouse. Instead of relying on intermediate caching layers or complex ETL services, this solution combines the open-source Debezium project with Google Cloud's managed services. A Debezium Server, running on a GCE instance, reads the change log from Cloud SQL and streams the events to a Pub/Sub topic. A BigQuery subscription then writes these events directly into a BigQuery table, making it ideal for real-time analytics and data warehousing with minimal operational overhead.
+This project implements a modern, serverless-first CDC architecture for streaming database changes to a data warehouse. Instead of relying on intermediate caching layers (like Kafka) or complex ETL services (like Dataflow), this solution combines the open-source Debezium project with Google Cloud's managed services. A Debezium Server, running on a GCE instance, reads the change log from Cloud SQL and streams the events to a Pub/Sub topic. A **BigQuery subscription** then writes these events directly into a BigQuery table, making it ideal for real-time analytics and data warehousing with minimal operational overhead. This approach significantly simplifies the data pipeline, reduces latency, and lowers total cost of ownership.
 
 ## 2. Functional Requirements
 
@@ -22,12 +22,15 @@ The Terraform configuration must provision and configure the following GCP servi
 | **Data Sink / Warehouse** | BigQuery & BigQuery Subscription | A BigQuery dataset and table to store the raw CDC events. A **BigQuery subscription** connects the Pub/Sub topic directly to the BigQuery table for serverless ingestion. |
 | **Networking** | VPC, Subnets, PSC, Cloud NAT | Secure private networking using a custom VPC. A **Private Service Connect (PSC) endpoint** provides a stable internal IP for the Cloud SQL instance. A Cloud NAT gateway is required for the GCE instance to download software packages and the Debezium Docker image. |
 | **Provisioning Helper** | Google Cloud Storage | A temporary GCS bucket is created and deleted during the `terraform apply` and `destroy` processes. It is used to copy Debezium configuration files from the local machine to the GCE VM. |
+| **Security & Permissions** | IAM (Identity and Access Management) | A set of fine-grained IAM roles and permissions to ensure that each service (GCE, Pub/Sub) has only the access it needs to function, following the principle of least privilege. |
 
 ### 2.2. Key Architectural Features
 - **Debezium-based CDC:** Utilizes the open-source Debezium engine, providing flexibility and reducing vendor lock-in.
-- **Serverless Sink with Pub/Sub and BigQuery:** CDC events are streamed to Pub/Sub and ingested into BigQuery via a direct subscription, creating a highly scalable, low-maintenance, and cost-effective data sink.
+- **Serverless Sink with Pub/Sub and BigQuery:** CDC events are streamed to Pub/Sub and ingested into BigQuery via a direct subscription, creating a highly scalable, low-maintenance, and cost-effective data sink. This eliminates the need for a separate data processing layer like Dataflow.
 - **Decoupled Architecture:** Pub/Sub acts as a message bus, decoupling the Debezium producer from the BigQuery consumer. This allows for greater resilience and flexibility.
 - **Secure by Default:** All components operate within a private VPC, with no public IPs for the database or the main GCE VM, enhancing security. Cloud SQL is accessed via a secure PSC endpoint.
+- **Infrastructure as Code (IaC) Management:** The entire infrastructure is defined and managed using Terraform, enabling consistent, repeatable, and version-controlled deployments.
+- **Automated Provisioning:** The solution includes scripts and Terraform configurations to automate the entire setup process, from network creation to Debezium Server configuration.
 
 ## 3. Non-Functional Requirements
 
@@ -97,8 +100,8 @@ The Terraform configuration must provision and configure the following GCP servi
 
 #### 4.1.4. BigQuery Sink
 - **Dataset and Table:** A BigQuery dataset (`debezium_sink`) and a table (`cdc_events`) are created to store the incoming data.
-- **Table Schema:** The table schema is predefined to accept the standard format from a BigQuery subscription, including `data` (JSON), `attributes` (JSON), `message_id`, `publish_time`, and `subscription_name`.
-- **Partitioning:** The table is partitioned by `publish_time` (Day) to optimize queries and manage costs.
+- **Table Schema:** The table schema is predefined to match the flattened JSON structure of the Debezium CDC events after the `event-flattening` SMT is applied. The BigQuery subscription is configured with `use_table_schema = true`, meaning it writes data by matching the JSON fields from the Pub/Sub message directly to the columns of the BigQuery table.
+- **Partitioning:** To optimize query performance and manage costs, the table is partitioned by time. It is crucial to use a `TIMESTAMP` or `DATETIME` column from the source table as the partitioning key. In this project, the table is partitioned by the `trans_datetime` column (Day).
 - **BigQuery Subscription:** A `google_pubsub_subscription` is configured with a `bigquery_config` block to write messages directly from the Pub/Sub topic to the target table.
 
 ### 4.2. Required Resources (High-Level)
@@ -140,7 +143,7 @@ The Terraform configuration must provision and configure the following GCP servi
     1.  Users can connect to the Cloud SQL instance via Cloud SQL Studio using the `rdsadmin` credentials and successfully execute SQL commands.
     2.  The Debezium Server Docker container is running on the GCE VM, confirmed via `docker ps`.
     3.  An `INSERT` statement executed in Cloud SQL results in a corresponding record appearing in the BigQuery `cdc_events` table within minutes.
-    4.  The `data` field of the BigQuery record contains the complete JSON payload from Debezium, including the before/after state of the changed row.
+    4.  The columns in the BigQuery record contain the flattened data from the Debezium JSON payload, matching the source table's structure.
 
 ## 6. Out of Scope
 
