@@ -536,6 +536,19 @@ To avoid incurring ongoing charges, destroy the infrastructure when you are fini
 
 #### Official Google Cloud Documentation
 - [BigQuery subscriptions :: Google Cloud Pub/Sub](https://cloud.google.com/pubsub/docs/bigquery)
+  > **BigQuery change data capture**
+  >
+  > BigQuery subscriptions support change data capture (CDC) updates when `use_topic_schema` or `use_table_schema` is set to true in the subscription properties. To use the feature with `use_topic_schema`, set the schema of the topic with the following fields:
+  >
+  > -   `_CHANGE_TYPE` (required): A string field set to `UPSERT` or `DELETE`.
+  >
+  >     If a Pub/Sub message written to the BigQuery table has `_CHANGE_TYPE` set to `UPSERT`, then BigQuery updates the row with the same key if it exists or inserts a new row if it does not.
+  >
+  >     If a Pub/Sub message written to the BigQuery table has `_CHANGE_TYPE` set to `DELETE`, then BigQuery deletes the row in the table with the same key if it exists.
+  >
+  > -   `_CHANGE_SEQUENCE_NUMBER` (optional): A string field set to ensure that updates and deletes made to the BigQuery table are processed in order. Messages for the same row key must contain a monotonically increasing value for `_CHANGE_SEQUENCE_NUMBER`. Messages with sequence numbers that are less than the highest sequence number processed for a row don't have any effect on the row in the BigQuery table. The sequence number must follow the `_CHANGE_SEQUENCE_NUMBER` format.
+  >
+  > To use the feature with `use_table_schema`, include the preceding fields in the JSON message.
 - [Create BigQuery subscriptions :: Google Cloud Pub/Sub](https://cloud.google.com/pubsub/docs/create-bigquery-subscription)
 - [MySQL Change Data Capture to BigQuery Template :: Google Cloud Dataflow](https://cloud.google.com/dataflow/docs/guides/templates/provided/mysql-change-data-capture-to-bigquery)
 
