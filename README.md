@@ -210,7 +210,7 @@ To avoid typing `sudo` for every `docker` command, you can add your user to the 
 
 1.  **Add the current user to the `docker` group:**
     ```bash
-sudo usermod -aG docker $USER
+    sudo usermod -aG docker $USER
     ```
 
 2.  **Apply the new group membership.** You can either log out and log back in, or run the following command to activate the changes for your current session:
